@@ -425,7 +425,10 @@ def step_kb(step: str) -> InlineKeyboardMarkup | None:
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🛎 Оформить проход в бизнес-зал")]],
+        keyboard=[
+            [KeyboardButton(text="🛎 Оформить проход в бизнес-зал")],
+            [KeyboardButton(text="📦 Мои заявки"), KeyboardButton(text="❓ Помощь")],
+        ],
         resize_keyboard=True,
     )
 
@@ -433,6 +436,40 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
 async def ask_step(target: Message, state: FSMContext, step: str):
     await state.set_state(getattr(OrderForm, step))
     await target.answer(QUESTIONS[step], reply_markup=step_kb(step))
+
+
+@router.message(F.text == "📦 Мои заявки")
+async def my_orders(message: Message):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10", (message.from_user.id,)
+        )
+        rows = await cur.fetchall()
+    if not rows:
+        await message.answer("У вас пока нет заявок. Оформите первую кнопкой ниже 👇", reply_markup=main_menu_kb())
+        return
+    lines = ["📦 <b>Ваши заявки</b>\n"]
+    for o in rows:
+        lines.append(
+            f"#{o['id']} — {o['airport']}, {o['flight_date']}, {o['persons']} чел. — "
+            f"{o['total']}₽ — {STATUS_RU.get(o['status'], o['status'])}"
+        )
+    await send_lines(message, lines)
+
+
+@router.message(F.text == "❓ Помощь")
+async def help_msg(message: Message):
+    await message.answer(
+        "❓ <b>Как это работает</b>\n\n"
+        "1️⃣ Нажмите «🛎 Оформить проход» и ответьте на несколько вопросов: "
+        "аэропорт, дата вылета, количество человек, ФИО пассажиров.\n"
+        "2️⃣ Заявка уходит менеджеру — он свяжется с вами прямо в этом чате.\n"
+        "3️⃣ Оплата переводом по номеру телефона, реквизиты пришлёт менеджер.\n"
+        "4️⃣ После оплаты вы получите подтверждение прохода.\n\n"
+        "💬 Любой вопрос можно просто написать сюда — менеджер ответит.",
+        reply_markup=main_menu_kb(),
+    )
 
 
 @router.message(F.text == "🛎 Оформить проход в бизнес-зал")
